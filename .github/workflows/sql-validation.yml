@@ -1,0 +1,51 @@
+name: SQL Validation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: PostgreSQL data checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: qa_user
+          POSTGRES_PASSWORD: qa_password
+          POSTGRES_DB: sql_qa
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U qa_user -d sql_qa"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://qa_user:qa_password@localhost:5432/sql_qa
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install --yes postgresql-client
+      - name: Run SQL validation suite
+        id: sql_tests
+        continue-on-error: true
+        run: ./scripts/run-validations.sh
+      - name: Publish validation counts
+        if: always()
+        run: ./.github/scripts/publish-summary.sh
+      - name: Fail when validation checks fail
+        if: steps.sql_tests.outcome == 'failure'
+        run: |
+          echo "::error title=SQL validation failed::Review the category summary and assertion output"
+          exit 1
